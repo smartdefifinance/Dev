@@ -25,9 +25,18 @@ Security measures: Implementing various security measures to prevent malicious a
 
 5. **Deploy the smart contract to Solana
 
-NOTE: 1. that in the InitLoan case, we first check that the account passed in is owned by the program, and then check that the lender's account has enough funds to lend. We use the Rent sysvar to ensure that the lender's account has enough rent-exempt space to store the account data, and then check that the account has enough lamports to cover the lender_amount. We then initialize the loan account with the lender's and borrower's public keys and the loan amount and collateral, and transfer the loan amount from the lender's account to the loan account.
+--------------------------------------------
+
+The user interface has two sections: one for creating a loan, and one for borrowing a loan. In the create loan section, the user can input the lender amount, collateral amount, and lender public key, and then click the Create Loan button to create a new loan account on the Solana blockchain. The loan public key is then displayed to the user.
+
+In the borrow loan section, the user can input the borrower amount, borrower public key, and loan public key. When the user clicks the Borrow Loan button, the frontend will call the borrowLoan function from the lendingBorrowing module to send a transaction to the Solana blockchain that borrows the specified amount from the loan.
+
+------------------------------------------- NOTE -------------------------------------------
+
+
+1. that in the InitLoan case, we first check that the account passed in is owned by the program, and then check that the lender's account has enough funds to lend. We use the Rent sysvar to ensure that the lender's account has enough rent-exempt space to store the account data, and then check that the account has enough lamports to cover the lender_amount. We then initialize the loan account with the lender's and borrower's public keys and the loan amount and collateral, and transfer the loan amount from the lender's account to the loan account.
 
 2. In the BorrowLoan case, we first check that the account passed in is owned by the program, and then check that the loan account has been initialized. We use the Rent sysvar to ensure that the borrower's account has enough rent-exempt space to store the account data, and then check that the account has enough lamports to cover the borrower_amount. We then transfer the collateral from the loan account to the borrower's account, and transfer the borrowed amount from the loan account to the borrower's account. Finally, we update the loan account with the borrower's public key and set is_initialized to false.
 
-
+-------------------------------------------
 
