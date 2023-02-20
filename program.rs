@@ -1,109 +1,123 @@
-struct User {
-    pub address: Pubkey,
-    pub balance: u64,
-}
+use solana_program::{
+    account_info::{next_account_info, AccountInfo},
+    entrypoint,
+    entrypoint::ProgramResult,
+    msg,
+    program_error::ProgramError,
+    pubkey::Pubkey,
+    program_pack::{IsInitialized, Pack, Sealed},
+    sysvar::{rent::Rent, Sysvar},
+};
 
-struct Loan {
+// Define the data structure for the account used to represent a loan
+#[derive(Debug, Default, PartialEq)]
+pub struct LoanAccount {
+    pub is_initialized: bool,
     pub lender: Pubkey,
     pub borrower: Pubkey,
     pub amount: u64,
-    pub interest_rate: u64,
-    pub duration: u64,
-    pub start_time: u64,
+    pub collateral: u64,
 }
 
-struct LendingProtocol {
-    pub users: HashMap<Pubkey, User>,
-    pub loans: HashMap<Pubkey, Loan>,
+// Implement the Pack trait to enable serialization of the loan account data
+impl Pack for LoanAccount {
+    const LEN: usize = 49;
+
+    fn pack_into_slice(&self, output: &mut [u8]) {
+        let output = array_mut_ref![output, 0, 49];
+        self.is_initialized.pack_into_slice(&mut output[0..1]);
+        self.lender.pack_into_slice(&mut output[1..33]);
+        self.borrower.pack_into_slice(&mut output[33..65]);
+        self.amount.pack_into_slice(&mut output[65..73]);
+        self.collateral.pack_into_slice(&mut output[73..81]);
+    }
+
+    fn unpack_from_slice(input: &[u8]) -> Result<Self, ProgramError> {
+        let input = array_ref![input, 0, 49];
+        Ok(Self {
+            is_initialized: input[0].into(),
+            lender: Pubkey::new_from_array(*array_ref![input, 1, 32]),
+            borrower: Pubkey::new_from_array(*array_ref![input, 33, 32]),
+            amount: u64::from_le_bytes(*array_ref![input, 65, 8]),
+            collateral: u64::from_le_bytes(*array_ref![input, 73, 8]),
+        })
+    }
 }
 
-impl LendingProtocol {
-    pub fn new() -> Self {
-        LendingProtocol {
-            users: HashMap::new(),
-            loans: HashMap::new(),
-        }
+// Implement the Sealed and IsInitialized traits to enable checks for whether an account is initialized
+impl Sealed for LoanAccount {}
+impl IsInitialized for LoanAccount {
+    fn is_initialized(&self) -> bool {
+        self.is_initialized
     }
+}
 
-    pub fn get_user_balance(&self, address: &Pubkey) -> u64 {
-        match self.users.get(address) {
-            Some(user) => user.balance,
-            None => 0,
-        }
-    }
+// Define the program ID and the instruction type
+#[derive(Debug)]
+pub enum LendingBorrowingInstruction {
+    InitLoan {
+        lender_amount: u64,
+        collateral_amount: u64,
+    },
+    BorrowLoan {
+        borrower_amount: u64,
+    },
+}
 
-    pub fn create_loan(
-        &mut self,
-        lender: &Pubkey,
-        borrower: &Pubkey,
-        amount: u64,
-        interest_rate: u64,
-        duration: u64,
-        start_time: u64,
-    ) -> Result<(), &'static str> {
-        let lender_balance = self.get_user_balance(lender);
-        if lender_balance < amount {
-            return Err("Lender does not have sufficient balance");
-        }
+// Define the entry point function for the program
+#[entrypoint]
+pub fn process_instruction(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    msg!("Lending-Borrowing Rust program entrypoint");
 
-        let loan = Loan {
-            lender: *lender,
-            borrower: *borrower,
-            amount: amount,
-            interest_rate: interest_rate,
-            duration: duration,
-            start_time: start_time,
-        };
-        self.loans.insert(*lender, loan);
+    // Parse the instruction data
+    let instruction = LendingBorrowingInstruction::unpack(instruction_data)?;
 
-        let lender_user = self.users.get_mut(lender).unwrap();
-        lender_user.balance -= amount;
+    // Match the instruction and execute the appropriate logic
+    match instruction {
+        LendingBorrowingInstruction::InitLoan { lender_amount, collateral_amount } => {
+            msg!("Instruction: InitLoan");
 
-        let borrower_user = self.users.entry(*borrower).or_insert(User {
-            address: *borrower,
-            balance: 0,
-        });
-        borrower_user.balance += amount;
+            // Check that the account passed in is owned by the program
+            let account_info_iter = &mut accounts.iter();
+            let loan_account_info = next_account_info(account_info_iter)?;
+            if loan_account_info.owner != program_id {
+                return Err(ProgramError::IncorrectProgramId);
+            }
 
-        Ok(())
-    }
+            // Check that the lender's account has enough funds to lend
+            let lender_account_info = next_account_info(account_info_iter)?;
+            let rent = &Rent::from_account_info(next_account_info(account_info_iter)?)?;
+            if !rent.is_exempt(lender_account_info.lamports(), lender_account_info.data_len()) {
+                return Err(ProgramError::AccountNotRentExempt);
+            }
+            if lender_account_info.lamports() < lender_amount {
+                return Err(ProgramError::InsufficientFunds);
+            }
 
-    pub fn repay_loan(&mut self, lender: &Pubkey, borrower: &Pubkey, amount: u64) -> Result<(), &'static str> {
-        let loan = match self.loans.get(lender) {
-            Some(l) if l.borrower == *borrower => l,
-            _ => return Err("Loan not found"),
-        };
-
-        let now = solana_program::clock::UnixTimestamp::now().into();
-        let elapsed_time = now - loan.start_time;
-        let interest_owed = (loan.amount * loan.interest_rate * elapsed_time) / (365 * 86400);
-
-        let total_owed = loan.amount + interest_owed;
-
-        if amount > total_owed {
-            return Err("Amount exceeds amount owed");
-        }
-
-        let lender_user = self.users.get_mut(lender).unwrap();
-        lender_user.balance += amount;
-
-        let borrower_user = self.users.get_mut(borrower).unwrap();
-        borrower_user.balance -= amount;
-
-        if amount == total_owed {
-            self.loans.remove(lender);
-        } else {
-            let new_loan = Loan {
-                lender: *lender,
-                borrower: *borrower,
-                amount: total_owed - amount,
-                interest_rate: loan.interest_rate,
-                duration: loan.duration - elapsed_time,
-                start_time: now,
+            // Initialize the loan account with the lender's and borrower's public keys and the loan amount and collateral
+            let loan_account = LoanAccount {
+                is_initialized: true,
+                lender: *lender_account_info.key,
+                borrower: Pubkey::default(),
+                amount: lender_amount,
+                collateral: collateral_amount,
             };
-            self.loans.insert(*lender, new_loan);
-        }
+            LoanAccount::pack_into_slice(&loan_account, &mut loan_account_info.data.borrow_mut())?;
 
-        Ok(())
+            // Transfer the loan amount from the lender's account to the loan account
+            **lender_account_info.try_borrow_mut_lamports()? -= lender_amount;
+            **loan_account_info.try_borrow_mut_lamports()? += lender_amount;
+
+            msg!("Loan initialized successfully");
+            Ok(())
+        },
+        LendingBorrowingInstruction::BorrowLoan { borrower_amount } => {
+            // BorrowLoan logic
+            unimplemented!()
+        },
     }
 }
