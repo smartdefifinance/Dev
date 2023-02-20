@@ -25,7 +25,9 @@ Security measures: Implementing various security measures to prevent malicious a
 
 5. **Deploy the smart contract to Solana
 
-NOTE: Note that in the InitLoan case, we first check that the account passed in is owned by the program, and then check that the lender's account has enough funds to lend. We use the Rent sysvar to ensure that the lender's account has enough rent-exempt space to store the account data, and then check that the account has enough lamports to cover the lender_amount. We then initialize the loan account with the lender's and borrower's public keys and the loan amount and collateral, and transfer the loan amount from the lender's account to the loan account.
+NOTE: 1. that in the InitLoan case, we first check that the account passed in is owned by the program, and then check that the lender's account has enough funds to lend. We use the Rent sysvar to ensure that the lender's account has enough rent-exempt space to store the account data, and then check that the account has enough lamports to cover the lender_amount. We then initialize the loan account with the lender's and borrower's public keys and the loan amount and collateral, and transfer the loan amount from the lender's account to the loan account.
+
+2. In the BorrowLoan case, we first check that the account passed in is owned by the program, and then check that the loan account has been initialized. We use the Rent sysvar to ensure that the borrower's account has enough rent-exempt space to store the account data, and then check that the account has enough lamports to cover the borrower_amount. We then transfer the collateral from the loan account to the borrower's account, and transfer the borrowed amount from the loan account to the borrower's account. Finally, we update the loan account with the borrower's public key and set is_initialized to false.
 
 
 
